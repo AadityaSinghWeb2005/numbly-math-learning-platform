@@ -1,13 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, XCircle, RotateCcw, Trophy, Target } from "lucide-react";
-import Navigation from "@/components/Navigation";
-import Footer from "@/components/Footer";
+import { CheckCircle2, XCircle, RotateCcw, Trophy, Target, Sparkles, Loader2 } from "lucide-react";
+import Navigation from "@/frontend/components/Navigation";
+import Footer from "@/frontend/components/Footer";
+import { useSession } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import type { AIQuizQuestion, MathTopic, DifficultyLevel } from "@/lib/types/quiz";
 
 interface Question {
   id: number;
@@ -18,99 +22,92 @@ interface Question {
   category: string;
 }
 
-const quizQuestions: Question[] = [
-  {
-    id: 1,
-    question: "What is 15 + 23?",
-    options: ["36", "38", "40", "42"],
-    correctAnswer: 1,
-    explanation: "15 + 23 = 38. Add the ones place: 5 + 3 = 8. Add the tens place: 1 + 2 = 3.",
-    category: "Addition",
-  },
-  {
-    id: 2,
-    question: "What is 50 - 17?",
-    options: ["33", "35", "37", "43"],
-    correctAnswer: 0,
-    explanation: "50 - 17 = 33. Borrow from the tens: 40 and 10 ones. Then 10 - 7 = 3, and 4 - 1 = 3.",
-    category: "Subtraction",
-  },
-  {
-    id: 3,
-    question: "What is 8 × 7?",
-    options: ["54", "56", "58", "60"],
-    correctAnswer: 1,
-    explanation: "8 × 7 = 56. This is an important multiplication fact to memorize!",
-    category: "Multiplication",
-  },
-  {
-    id: 4,
-    question: "What is 36 ÷ 4?",
-    options: ["7", "8", "9", "10"],
-    correctAnswer: 2,
-    explanation: "36 ÷ 4 = 9. Think: 4 × 9 = 36.",
-    category: "Division",
-  },
-  {
-    id: 5,
-    question: "What is 125 + 78?",
-    options: ["201", "203", "205", "207"],
-    correctAnswer: 1,
-    explanation: "125 + 78 = 203. Add ones: 5 + 8 = 13 (carry 1). Tens: 2 + 7 + 1 = 10 (carry 1). Hundreds: 1 + 1 = 2.",
-    category: "Addition",
-  },
-  {
-    id: 6,
-    question: "What is 12 × 12?",
-    options: ["124", "134", "144", "154"],
-    correctAnswer: 2,
-    explanation: "12 × 12 = 144. A common square to remember: 12² = 144.",
-    category: "Multiplication",
-  },
-  {
-    id: 7,
-    question: "What is 91 - 28?",
-    options: ["61", "63", "65", "67"],
-    correctAnswer: 1,
-    explanation: "91 - 28 = 63. Borrow: 81 and 11 ones. Then 11 - 8 = 3, and 8 - 2 = 6.",
-    category: "Subtraction",
-  },
-  {
-    id: 8,
-    question: "What is 72 ÷ 8?",
-    options: ["7", "8", "9", "10"],
-    correctAnswer: 2,
-    explanation: "72 ÷ 8 = 9. Think: 8 × 9 = 72.",
-    category: "Division",
-  },
-  {
-    id: 9,
-    question: "What is 45 + 39?",
-    options: ["82", "84", "86", "88"],
-    correctAnswer: 1,
-    explanation: "45 + 39 = 84. Add ones: 5 + 9 = 14 (carry 1). Tens: 4 + 3 + 1 = 8.",
-    category: "Addition",
-  },
-  {
-    id: 10,
-    question: "What is 9 × 9?",
-    options: ["72", "81", "90", "99"],
-    correctAnswer: 1,
-    explanation: "9 × 9 = 81. Another important square: 9² = 81.",
-    category: "Multiplication",
-  },
-];
-
 export default function PracticePage() {
+  const { data: session, isPending } = useSession();
+  const router = useRouter();
+  
+  const [showGenerator, setShowGenerator] = useState(true);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedTopic, setSelectedTopic] = useState<MathTopic>("mixed");
+  const [selectedDifficulty, setSelectedDifficulty] = useState<DifficultyLevel>("medium");
+  const [questionCount, setQuestionCount] = useState(10);
+  const [useProgressive, setUseProgressive] = useState(false);
+  
+  const [quizQuestions, setQuizQuestions] = useState<Question[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [showFeedback, setShowFeedback] = useState(false);
   const [score, setScore] = useState(0);
   const [answeredQuestions, setAnsweredQuestions] = useState<number[]>([]);
   const [quizComplete, setQuizComplete] = useState(false);
+  const [startTime, setStartTime] = useState<Date | null>(null);
+
+  useEffect(() => {
+    if (!isPending && !session?.user) {
+      router.push(`/sign-in?redirect=${encodeURIComponent(window.location.pathname)}`);
+    }
+  }, [session, isPending, router]);
+
+  if (isPending) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!session?.user) {
+    return null;
+  }
 
   const question = quizQuestions[currentQuestion];
-  const progress = ((currentQuestion + 1) / quizQuestions.length) * 100;
+  const progress = quizQuestions.length > 0 ? ((currentQuestion + 1) / quizQuestions.length) * 100 : 0;
+
+  const handleGenerateQuiz = async () => {
+    setIsGenerating(true);
+    try {
+      const response = await fetch("/api/quiz/generate", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${localStorage.getItem("bearer_token")}`,
+        },
+        body: JSON.stringify({
+          topic: selectedTopic,
+          difficulty: useProgressive ? undefined : selectedDifficulty,
+          count: questionCount,
+          progressive: useProgressive,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to generate quiz");
+      }
+
+      const data = await response.json();
+      
+      // Convert AI questions to the format expected by the quiz UI
+      const convertedQuestions: Question[] = data.questions.map((q: AIQuizQuestion, idx: number) => ({
+        id: idx + 1,
+        question: q.question,
+        options: q.options.map(opt => opt.text),
+        correctAnswer: q.options.findIndex(opt => opt.isCorrect),
+        explanation: q.correctAnswerExplanation,
+        category: q.topic.charAt(0).toUpperCase() + q.topic.slice(1),
+      }));
+
+      setQuizQuestions(convertedQuestions);
+      setShowGenerator(false);
+      setStartTime(new Date());
+      toast.success(`Generated ${convertedQuestions.length} AI-powered questions!`);
+    } catch (error) {
+      console.error("Quiz generation error:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to generate quiz");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   const handleAnswerSelect = (index: number) => {
     if (!showFeedback) {
@@ -136,7 +133,34 @@ export default function PracticePage() {
       setSelectedAnswer(null);
       setShowFeedback(false);
     } else {
-      setQuizComplete(true);
+      handleQuizComplete();
+    }
+  };
+
+  const handleQuizComplete = async () => {
+    setQuizComplete(true);
+    
+    if (!session?.user || !startTime) return;
+
+    const endTime = new Date();
+    const timeSpent = Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
+
+    try {
+      await fetch("/api/quiz-attempts", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${localStorage.getItem("bearer_token")}`,
+        },
+        body: JSON.stringify({
+          userId: session.user.id,
+          score,
+          totalQuestions: quizQuestions.length,
+          timeSpent,
+        }),
+      });
+    } catch (error) {
+      console.error("Failed to save quiz attempt:", error);
     }
   };
 
@@ -147,6 +171,9 @@ export default function PracticePage() {
     setScore(0);
     setAnsweredQuestions([]);
     setQuizComplete(false);
+    setQuizQuestions([]);
+    setShowGenerator(true);
+    setStartTime(null);
   };
 
   const getScoreMessage = () => {
@@ -157,6 +184,135 @@ export default function PracticePage() {
     return "Keep practicing! You'll get better! 💪";
   };
 
+  // Quiz Generator UI
+  if (showGenerator) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Navigation />
+        
+        <main className="flex-1 py-12">
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="max-w-2xl mx-auto">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="h-12 w-12 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                      <Sparkles className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-3xl">AI Quiz Generator</CardTitle>
+                      <CardDescription>Create personalized math quizzes powered by AI</CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Topic</label>
+                      <select
+                        value={selectedTopic}
+                        onChange={(e) => setSelectedTopic(e.target.value as MathTopic)}
+                        className="w-full border-2 border-border bg-background px-4 py-2.5 rounded-lg focus:outline-none focus:border-primary transition-colors"
+                      >
+                        <option value="mixed">Mixed (All Topics)</option>
+                        <option value="addition">Addition</option>
+                        <option value="subtraction">Subtraction</option>
+                        <option value="multiplication">Multiplication</option>
+                        <option value="division">Division</option>
+                        <option value="fractions">Fractions</option>
+                        <option value="decimals">Decimals</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-3 p-4 bg-muted/50 rounded-lg">
+                      <input
+                        type="checkbox"
+                        id="progressive"
+                        checked={useProgressive}
+                        onChange={(e) => setUseProgressive(e.target.checked)}
+                        className="h-4 w-4 rounded border-primary"
+                      />
+                      <label htmlFor="progressive" className="text-sm font-medium cursor-pointer flex-1">
+                        Progressive Mode (Easy → Medium → Hard)
+                      </label>
+                      <Badge variant="secondary">Recommended</Badge>
+                    </div>
+
+                    {!useProgressive && (
+                      <div>
+                        <label className="block text-sm font-medium mb-2">Difficulty Level</label>
+                        <div className="grid grid-cols-3 gap-3">
+                          {(["easy", "medium", "hard"] as DifficultyLevel[]).map((diff) => (
+                            <button
+                              key={diff}
+                              onClick={() => setSelectedDifficulty(diff)}
+                              className={`p-3 rounded-lg border-2 transition-all font-medium capitalize ${
+                                selectedDifficulty === diff
+                                  ? "border-primary bg-primary/10"
+                                  : "border-border hover:border-primary"
+                              }`}
+                            >
+                              {diff}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-sm font-medium mb-2">
+                        Number of Questions: {questionCount}
+                      </label>
+                      <input
+                        type="range"
+                        min="5"
+                        max="20"
+                        step="5"
+                        value={questionCount}
+                        onChange={(e) => setQuestionCount(parseInt(e.target.value))}
+                        className="w-full"
+                      />
+                      <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                        <span>5 questions</span>
+                        <span>20 questions</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Button
+                    onClick={handleGenerateQuiz}
+                    disabled={isGenerating}
+                    size="lg"
+                    className="w-full"
+                  >
+                    {isGenerating ? (
+                      <>
+                        <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                        Generating Quiz...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-5 w-5 mr-2" />
+                        Generate AI Quiz
+                      </>
+                    )}
+                  </Button>
+
+                  <p className="text-sm text-muted-foreground text-center">
+                    Each quiz is uniquely generated by AI to match your selected preferences
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </main>
+
+        <Footer />
+      </div>
+    );
+  }
+
+  // Quiz Complete Screen
   if (quizComplete) {
     return (
       <div className="min-h-screen flex flex-col">
@@ -202,8 +358,8 @@ export default function PracticePage() {
 
                   <div className="flex gap-4 justify-center">
                     <Button onClick={handleRestart} size="lg">
-                      <RotateCcw className="h-4 w-4 mr-2" />
-                      Try Again
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Generate New Quiz
                     </Button>
                     <Button variant="outline" size="lg" asChild>
                       <a href="/lessons">Review Lessons</a>
@@ -220,6 +376,7 @@ export default function PracticePage() {
     );
   }
 
+  // Quiz Question Screen
   return (
     <div className="min-h-screen flex flex-col">
       <Navigation />
@@ -229,14 +386,20 @@ export default function PracticePage() {
           <div className="max-w-2xl mx-auto">
             <div className="mb-8">
               <div className="flex items-center justify-between mb-4">
-                <h1 className="text-4xl font-bold">Practice Quiz</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-4xl font-bold">AI Quiz</h1>
+                  <Badge variant="outline" className="bg-gradient-to-r from-blue-500 to-purple-600 text-white border-0">
+                    <Sparkles className="h-3 w-3 mr-1" />
+                    AI-Powered
+                  </Badge>
+                </div>
                 <Badge variant="outline" className="text-base px-4 py-2">
                   <Target className="h-4 w-4 mr-2" />
                   Score: {score}/{answeredQuestions.length}
                 </Badge>
               </div>
               <p className="text-lg text-muted-foreground">
-                Test your skills with these practice problems
+                Test your skills with AI-generated questions
               </p>
             </div>
 
