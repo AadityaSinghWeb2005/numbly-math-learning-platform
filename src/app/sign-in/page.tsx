@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authClient } from "@/lib/auth-client";
+import { authClient, useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,12 +14,20 @@ import { toast } from "sonner";
 
 export default function SignInPage() {
   const router = useRouter();
+  const { data: session, isPending, refetch } = useSession();
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     email: "",
     password: "",
     rememberMe: false,
   });
+
+  // Redirect if already signed in
+  useEffect(() => {
+    if (!isPending && session?.user) {
+      router.push("/dashboard");
+    }
+  }, [session, isPending, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,7 +38,6 @@ export default function SignInPage() {
         email: formData.email,
         password: formData.password,
         rememberMe: formData.rememberMe,
-        callbackURL: "/dashboard",
       });
 
       if (error?.code) {
@@ -39,13 +46,36 @@ export default function SignInPage() {
         return;
       }
 
+      // Wait for token to be stored
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Refetch session to ensure it's updated
+      await refetch();
+      
       toast.success("Welcome back!");
+      
+      // Wait a bit more to ensure session is fully established
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Redirect to dashboard
       router.push("/dashboard");
     } catch (err) {
       toast.error("An error occurred. Please try again.");
       setIsLoading(false);
     }
   };
+
+  // Show loading while checking session
+  if (isPending) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+        <div className="text-center">
+          <Calculator className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 p-4">
@@ -106,7 +136,7 @@ export default function SignInPage() {
                 htmlFor="rememberMe"
                 className="text-sm font-normal cursor-pointer"
               >
-                Remember me
+                Remember me for 7 days
               </Label>
             </div>
 
