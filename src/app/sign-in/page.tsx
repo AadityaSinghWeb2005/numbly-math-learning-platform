@@ -40,22 +40,16 @@ export default function SignInPage() {
         rememberMe: formData.rememberMe,
       });
 
-      if (error?.code) {
+      if (error) {
         toast.error("Invalid email or password. Please make sure you have already registered an account and try again.");
         setIsLoading(false);
         return;
       }
 
-      // Wait for token to be stored
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Refetch session to ensure it's updated
-      await refetch();
-      
       toast.success("Welcome back!");
       
-      // Wait a bit more to ensure session is fully established
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Refetch session to update state
+      await refetch();
       
       // Redirect to dashboard
       router.push("/dashboard");
@@ -75,6 +69,11 @@ export default function SignInPage() {
         </div>
       </div>
     );
+  }
+
+  // Don't render form if already authenticated
+  if (session?.user) {
+    return null;
   }
 
   return (
