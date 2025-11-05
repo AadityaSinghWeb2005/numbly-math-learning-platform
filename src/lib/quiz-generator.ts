@@ -1,5 +1,4 @@
-import OpenAI from 'openai';
-import client from './openai-client';
+import geminiClient from './gemini-client';
 import { AIQuizQuestion, DifficultyLevel, MathTopic } from './types/quiz';
 
 const DIFFICULTY_DESCRIPTORS: Record<DifficultyLevel, string> = {
@@ -39,7 +38,7 @@ Requirements:
 - For word problems, use relatable scenarios (school, sports, shopping, etc.)
 - Vary the question format (direct calculation, word problems, comparison)
 
-Return a JSON object with this exact structure:
+Return ONLY valid JSON (no markdown, no explanation) with this exact structure:
 {
   "questions": [
     {
@@ -59,44 +58,55 @@ Return a JSON object with this exact structure:
 }`;
 
   try {
-    const response = await client.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are an expert math teacher creating educational quiz questions for students learning mathematics. Always respond with valid JSON.',
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.8,
-      max_tokens: 4000,
+    const response = await geminiClient.models.generateContent({
+      model: 'gemini-2.0-flash-exp',
+      contents: prompt,
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.8,
+        maxOutputTokens: 4000,
+      },
     });
 
-    const content = response.choices[0].message.content;
-    if (!content) {
-      throw new Error('No response content from OpenAI');
+    // Extract text from response
+    let jsonText = '';
+    if (Array.isArray(response.candidates) && response.candidates.length > 0) {
+      const candidate = response.candidates[0];
+      if (candidate.content && Array.isArray(candidate.content.parts)) {
+        jsonText = candidate.content.parts
+          .map((part: any) => part.text || '')
+          .join('');
+      }
     }
 
-    const parsed = JSON.parse(content);
+    if (!jsonText) {
+      throw new Error('No response content from Gemini');
+    }
+
+    // Clean markdown code blocks if present
+    jsonText = jsonText.trim();
+    if (jsonText.startsWith('```')) {
+      // Remove markdown code block wrapper
+      jsonText = jsonText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+    }
+
+    const parsed = JSON.parse(jsonText);
     if (!parsed.questions || !Array.isArray(parsed.questions)) {
-      throw new Error('Invalid response format from OpenAI');
+      throw new Error('Invalid response format from Gemini');
     }
 
     return parsed.questions as AIQuizQuestion[];
   } catch (error) {
-    if (error instanceof OpenAI.APIError) {
-      if (error.status === 429) {
+    if (error instanceof Error) {
+      // Handle specific Gemini API errors
+      if (error.message.includes('API_KEY_INVALID')) {
+        throw new Error('Invalid Google Gemini API key. Please check your configuration.');
+      }
+      if (error.message.includes('RATE_LIMIT_EXCEEDED') || error.message.includes('429')) {
         throw new Error('Rate limit exceeded. Please try again in a few moments.');
       }
-      if (error.status === 401) {
-        throw new Error('Invalid OpenAI API key. Please check your configuration.');
-      }
-      if (error.status === 500) {
-        throw new Error('OpenAI service error. Please try again later.');
+      if (error.message.includes('500') || error.message.includes('503')) {
+        throw new Error('Gemini service error. Please try again later.');
       }
     }
     console.error('Quiz generation error:', error);
