@@ -23,75 +23,6 @@ export async function generateQuizQuestions(
   difficulty: DifficultyLevel,
   count: number
 ): Promise<AIQuizQuestion[]> {
-  const schema: Record<string, unknown> = {
-    type: 'object',
-    properties: {
-      questions: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            id: {
-              type: 'string',
-              description: 'Unique identifier for the question',
-            },
-            question: {
-              type: 'string',
-              description: 'The full text of the math question',
-            },
-            topic: {
-              type: 'string',
-              enum: ['addition', 'subtraction', 'multiplication', 'division', 'fractions', 'decimals', 'mixed'],
-            },
-            difficulty: {
-              type: 'string',
-              enum: ['easy', 'medium', 'hard'],
-            },
-            options: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  id: {
-                    type: 'string',
-                    description: 'Option identifier (A, B, C, D)',
-                  },
-                  text: {
-                    type: 'string',
-                    description: 'The option text (numeric answer)',
-                  },
-                  isCorrect: {
-                    type: 'boolean',
-                    description: 'Whether this is the correct answer',
-                  },
-                },
-                required: ['id', 'text', 'isCorrect'],
-                additionalProperties: false,
-              },
-              minItems: 4,
-              maxItems: 4,
-            },
-            correctAnswerExplanation: {
-              type: 'string',
-              description: 'Step-by-step explanation of how to solve the problem',
-            },
-          },
-          required: [
-            'id',
-            'question',
-            'topic',
-            'difficulty',
-            'options',
-            'correctAnswerExplanation',
-          ],
-          additionalProperties: false,
-        },
-      },
-    },
-    required: ['questions'],
-    additionalProperties: false,
-  };
-
   const prompt = `Generate exactly ${count} unique multiple-choice math quiz questions on ${topic}.
 
 Topic focus: ${TOPIC_DESCRIPTIONS[topic]}
@@ -106,36 +37,53 @@ Requirements:
 - Use whole numbers for answers to keep it simple
 - Make questions engaging and appropriate for the difficulty level
 - For word problems, use relatable scenarios (school, sports, shopping, etc.)
-- Vary the question format (direct calculation, word problems, comparison)`;
+- Vary the question format (direct calculation, word problems, comparison)
+
+Return a JSON object with this exact structure:
+{
+  "questions": [
+    {
+      "id": "unique-id",
+      "question": "Question text",
+      "topic": "${topic}",
+      "difficulty": "${difficulty}",
+      "options": [
+        { "id": "A", "text": "Answer A", "isCorrect": false },
+        { "id": "B", "text": "Answer B", "isCorrect": true },
+        { "id": "C", "text": "Answer C", "isCorrect": false },
+        { "id": "D", "text": "Answer D", "isCorrect": false }
+      ],
+      "correctAnswerExplanation": "Step-by-step explanation"
+    }
+  ]
+}`;
 
   try {
-    const response = await client.beta.chat.completions.parse({
-      model: 'gpt-4o-2024-08-06',
+    const response = await client.chat.completions.create({
+      model: 'gpt-4o',
       messages: [
         {
           role: 'system',
-          content: 'You are an expert math teacher creating educational quiz questions for students learning mathematics.',
+          content: 'You are an expert math teacher creating educational quiz questions for students learning mathematics. Always respond with valid JSON.',
         },
         {
           role: 'user',
           content: prompt,
         },
       ],
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'quiz_questions',
-          schema,
-          strict: true,
-        },
-      },
+      response_format: { type: 'json_object' },
       temperature: 0.8,
       max_tokens: 4000,
     });
 
-    const parsed = response.choices[0].message.parsed;
-    if (!parsed) {
-      throw new Error('No parsed response from OpenAI');
+    const content = response.choices[0].message.content;
+    if (!content) {
+      throw new Error('No response content from OpenAI');
+    }
+
+    const parsed = JSON.parse(content);
+    if (!parsed.questions || !Array.isArray(parsed.questions)) {
+      throw new Error('Invalid response format from OpenAI');
     }
 
     return parsed.questions as AIQuizQuestion[];
